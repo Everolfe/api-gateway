@@ -32,8 +32,6 @@ public class RegistrationService {
                     if (responseEntity.getStatusCode().is2xxSuccessful()) {
                         String xRegistrationId = responseEntity.getHeaders()
                                 .getFirst("X-Registration-Id");
-                        String body = responseEntity.getBody();
-
                         if (xRegistrationId != null) {
                             log.info("Registration initiated. outboxId={}", xRegistrationId);
                             return Mono.just(new RegistrationResponse(
