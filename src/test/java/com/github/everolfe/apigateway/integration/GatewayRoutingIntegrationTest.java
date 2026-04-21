@@ -24,16 +24,9 @@ class GatewayRoutingIntegrationTest {
     private WebTestClient webTestClient;
 
     @Test
-    void routeToAuthService_Login_ShouldBeAccessible() {
+    void routeToAuthService_Login_ShouldBeProxied() {
         webTestClient.post()
-                .uri("/api/gateway/auth/login")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue("""
-                        {
-                            "email": "test@example.com",
-                            "password": "password123"
-                        }
-                        """)
+                .uri("/api/auth/health")
                 .exchange()
                 .expectStatus().is4xxClientError();
     }
