@@ -72,6 +72,41 @@ services:
       timeout: 5s
       retries: 5
 
+  mongo-db:
+    image: mongo:6.0
+    container_name: payment-mongo_db
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${PAYMENT_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${PAYMENT_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${PAYMENT_DB_NAME}
+    ports:
+      - "${MONGO_PORT}:27017"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: payment-zookeeper
+    ports:
+      - "${ZOOKEEPER_PORT}:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: payment-kafka
+    depends_on:
+      - zookeeper
+    ports:
+       - "${KAFKA_PORT}:${KAFKA_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:${KAFKA_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
   auth-service-app:
     container_name: authservice-app
     build:
@@ -82,9 +117,10 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
       APP_PORT: ${AUTH_APP_PORT}
+      D_DB_HOST: postgres-auth-db
       D_DB_USERNAME: ${AUTH_DB_USERNAME}
       D_DB_PASSWORD: ${AUTH_DB_PASSWORD}
-      D_DB_HOST_PORT: ${AUTH_DB_HOST_PORT}
+      D_DB_HOST_PORT: 5432
       D_DB_NAME: ${AUTH_DB_NAME}
       D_USER_URL: ${AUTH_USER_URL}
       REDIS_HOST: auth-redis-cache
@@ -105,9 +141,10 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: docker
       APP_PORT: ${USER_APP_PORT}
+      D_DB_HOST: postgres-user-db
       D_DB_USERNAME: ${USER_DB_USERNAME}
       D_DB_PASSWORD: ${USER_DB_PASSWORD}
-      D_DB_HOST_PORT: ${USER_DB_HOST_PORT}
+      D_DB_HOST_PORT: 5432
       D_DB_NAME: ${USER_DB_NAME}
       REDIS_HOST: user-redis-cache
       REDIS_PORT: ${USER_REDIS_PORT}
@@ -126,15 +163,51 @@ services:
       - "${ORDER_APP_PORT}:${ORDER_APP_PORT}"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      D_DB_HOST: postgres-order-db
       APP_PORT: ${ORDER_APP_PORT}
       D_DB_USERNAME: ${ORDER_DB_USERNAME}
+      BOOTSTRAP_SERVER: ${INTERNAL_BOOTSTRAP_SERVER}
       D_DB_PASSWORD: ${ORDER_DB_PASSWORD}
-      D_DB_HOST_PORT: ${ORDER_DB_HOST_PORT}
+      D_DB_HOST_PORT: 5432
+      GROUP_ID: order-service-group
       D_DB_NAME: ${ORDER_DB_NAME}
+      ORDER_CONSUMER_TOPIC: ${PAYMENT_PRODUCER_TOPIC}
       DOCKER_USER_URL: ${DOCKER_USER_URL}
     depends_on:
       postgres-order-db:
         condition: service_healthy
+      kafka:
+        condition: service_started
+
+  payment-service-app:
+    container_name: paymentservice-app
+    build:
+      context: ./../payment-service
+      dockerfile: Dockerfile
+    ports:
+      - "${PAYMENT_APP_PORT}:${PAYMENT_APP_PORT}"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      APP_PORT: ${PAYMENT_APP_PORT}
+      SPRING_DATA_MONGODB_URI: mongodb://${PAYMENT_ROOT_USERNAME}:${PAYMENT_ROOT_PASSWORD}@mongo-db:27017/${PAYMENT_DB_NAME}?authSource=admin
+      MONGO_DB_URI: mongodb://${PAYMENT_ROOT_USERNAME}:${PAYMENT_ROOT_PASSWORD}@mongo-db:27017/${PAYMENT_DB_NAME}?authSource=admin
+      AUTH_APP_PORT: ${AUTH_APP_PORT}
+      MONGO_PORT: ${MONGO_PORT}
+      DB_NAME: ${PAYMENT_DB_NAME}
+      ROOT_USERNAME: ${PAYMENT_ROOT_USERNAME}
+      ROOT_PASSWORD: ${PAYMENT_ROOT_PASSWORD}
+      BOOTSTRAP_SERVER: kafka:29092
+      PRODUCER_TOPIC: ${PAYMENT_PRODUCER_TOPIC}
+      RANDOM_API: ${RANDOM_URI}
+    depends_on:
+      mongo-db:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:${PAYMENT_APP_PORT}/actuator/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   api-gateway-app:
     container_name: api-gateway
@@ -149,6 +222,7 @@ services:
       AUTH_APP_PORT: ${AUTH_APP_PORT}
       USER_APP_PORT: ${USER_APP_PORT}
       ORDER_APP_PORT: ${ORDER_APP_PORT}
+      PAYMENT_APP_PORT: ${PAYMENT_APP_PORT}
     depends_on:
       auth-service-app:
         condition: service_healthy
@@ -156,6 +230,10 @@ services:
         condition: service_healthy
       order-service-app:
         condition: service_healthy
+      payment-service-app:
+        condition: service_healthy
+
+
 
 volumes:
   postgres-data:
