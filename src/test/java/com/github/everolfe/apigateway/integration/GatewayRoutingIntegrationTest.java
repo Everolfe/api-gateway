@@ -16,6 +16,7 @@ import java.util.UUID;
         "AUTH_APP_PORT=8082",
         "USER_APP_PORT=8081",
         "ORDER_APP_PORT=8083",
+        "PAYMENT_APP_PORT=8085",
         "GATEWAY_APP_PORT=8084"
 })
 class GatewayRoutingIntegrationTest {
